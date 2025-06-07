@@ -1,0 +1,374 @@
+ <!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Game Pesawat 2D Stabil</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            width: 100%;
+            height: 100%;
+        }
+        canvas {
+            display: block;
+            background-color: #0a0a23;
+        }
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background-color: rgba(0, 0, 0, 0.75);
+            z-index: 100;
+        }
+        .hidden {
+            display: none;
+        }
+        .button {
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            background-color: #2196F3;
+            color: white;
+            border: 2px solid #64B5F6;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-top: 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        #controls-container {
+            position: absolute;
+            bottom: 15px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            padding: 0 5%;
+            box-sizing: border-box;
+            z-index: 50;
+            pointer-events: none;
+        }
+        .control-pad {
+            pointer-events: auto;
+            width: 120px;
+            height: 120px;
+            position: relative;
+        }
+        .control-btn {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            background-color: rgba(255, 255, 255, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .control-btn:active {
+            background-color: rgba(255, 255, 255, 0.6);
+        }
+        #btn-up { top: 0; left: 35px; }
+        #btn-down { bottom: 0; left: 35px; }
+        #btn-left { top: 35px; left: 0; }
+        #btn-right { top: 35px; right: 0; }
+        #btn-fire {
+            width: 75px;
+            height: 75px;
+            font-size: 2rem;
+            background-color: rgba(255, 82, 82, 0.4);
+            border-color: rgba(255, 82, 82, 0.7);
+        }
+         #btn-fire:active {
+            background-color: rgba(255, 82, 82, 0.7);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-container">
+        <div id="start-screen" class="ui-overlay">
+            <h1>PERANG BINTANG</h1>
+            <p>Hancurkan musuh dan bertahanlah!</p>
+            <button id="start-button" class="button">Mulai</button>
+        </div>
+        <div id="game-over-screen" class="ui-overlay hidden">
+            <h1>GAME OVER</h1>
+            <p id="final-score"></p>
+            <button id="restart-button" class="button">Main Lagi</button>
+        </div>
+    </div>
+    
+    <div id="controls-container" class="hidden">
+        <div class="control-pad">
+            <div id="btn-up" class="control-btn">▲</div>
+            <div id="btn-left" class="control-btn">◄</div>
+            <div id="btn-right" class="control-btn">►</div>
+            <div id="btn-down" class="control-btn">▼</div>
+        </div>
+        <div class="control-pad" style="display: flex; justify-content: flex-end; align-items: center;">
+            <div id="btn-fire" class="control-btn">💥</div>
+        </div>
+    </div>
+
+<script>
+window.onload = function() {
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // UI Elements
+    const startScreen = document.getElementById('start-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const controlsContainer = document.getElementById('controls-container');
+    const startButton = document.getElementById('start-button');
+    const restartButton = document.getElementById('restart-button');
+    const finalScoreElement = document.getElementById('final-score');
+
+    // Game variables
+    let player, enemies, bullets, stars, score, gameLoopId;
+    let isGameRunning = false;
+    const keys = {};
+    const controlState = { up: false, down: false, left: false, right: false };
+
+    // --- Audio Context for stability ---
+    let audioContext;
+    let laserBuffer, musicBuffer;
+    let musicSource;
+
+    function initAudio() {
+        if (audioContext) return;
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Load laser sound
+        fetch('https://archive.org/download/laser-gun-sound-effect/laser-gun-sound-effect.mp3')
+            .then(response => response.arrayBuffer())
+            .then(data => audioContext.decodeAudioData(data))
+            .then(buffer => laserBuffer = buffer)
+            .catch(e => console.error("Error loading laser sound:", e));
+            
+        // Load music
+        fetch('https://archive.org/download/4_20220902/4.mp3')
+            .then(response => response.arrayBuffer())
+            .then(data => audioContext.decodeAudioData(data))
+            .then(buffer => musicBuffer = buffer)
+            .catch(e => console.error("Error loading music:", e));
+    }
+
+    function playSound(buffer, volume = 1.0) {
+        if (!buffer || !audioContext) return;
+        const source = audioContext.createBufferSource();
+        const gainNode = audioContext.createGain();
+        source.buffer = buffer;
+        gainNode.gain.value = volume;
+        source.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        source.start(0);
+    }
+    
+    function startMusic() {
+        if (musicSource) musicSource.stop();
+        if (!musicBuffer || !audioContext) return;
+        musicSource = audioContext.createBufferSource();
+        musicSource.buffer = musicBuffer;
+        musicSource.loop = true;
+        
+        const gainNode = audioContext.createGain();
+        gainNode.gain.value = 0.3; // Music volume
+        musicSource.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        musicSource.start(0);
+    }
+    
+    function stopMusic() {
+        if (musicSource) musicSource.stop();
+    }
+    
+    // Canvas setup
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // --- Game Objects & Drawing ---
+    function drawPlayer() {
+        ctx.save();
+        ctx.translate(player.x, player.y);
+        ctx.fillStyle = '#E0E0E0'; // Light grey
+        ctx.beginPath();
+        ctx.moveTo(0, -22); ctx.lineTo(18, 12); ctx.lineTo(18, 22); ctx.lineTo(-18, 22); ctx.lineTo(-18, 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#42A5F5'; // Blue cockpit
+        ctx.beginPath();
+        ctx.moveTo(0, -15); ctx.lineTo(6, -2); ctx.lineTo(-6, -2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#9E9E9E'; // Darker grey tail
+        ctx.fillRect(-4, 22, 8, 4);
+        ctx.restore();
+    }
+    
+    function createStars(count) {
+        stars = [];
+        for (let i = 0; i < count; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                radius: Math.random() * 1.5
+            });
+        }
+    }
+    
+    function drawBackground() {
+        ctx.fillStyle = '#0a0a23';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        stars.forEach(star => {
+            star.y += 0.3;
+            if (star.y > canvas.height) star.y = 0;
+            ctx.fillRect(star.x, star.y, star.radius, star.radius);
+        });
+    }
+
+    // --- Game Logic ---
+    function gameLoop() {
+        drawBackground();
+        
+        // Update & Draw Player
+        player.x += (keys.d || controlState.right) ? player.speed : (keys.a || controlState.left) ? -player.speed : 0;
+        player.y += (keys.s || controlState.down) ? player.speed : (keys.w || controlState.up) ? -player.speed : 0;
+        
+        // Boundaries
+        if (player.x < 25) player.x = 25;
+        if (player.x > canvas.width - 25) player.x = canvas.width - 25;
+        if (player.y < 28) player.y = 28;
+        if (player.y > canvas.height - 28) player.y = canvas.height - 28;
+        
+        drawPlayer();
+        
+        // Update & Draw Bullets and Enemies
+        bullets.forEach((b, i) => { b.y -= 7; if (b.y < 0) bullets.splice(i, 1); ctx.fillStyle = '#FFFF00'; ctx.fillRect(b.x - 2, b.y, 4, 10); });
+        enemies.forEach((e, i) => { e.y += e.speed; if (e.y > canvas.height) enemies.splice(i, 1); ctx.fillStyle = '#FF5252'; ctx.fillRect(e.x - e.w/2, e.y, e.w, e.h); });
+
+        // Collision Detection
+        enemies.forEach((e, ei) => {
+            bullets.forEach((b, bi) => {
+                if (b.x > e.x - e.w/2 && b.x < e.x + e.w/2 && b.y < e.y + e.h && b.y > e.y) {
+                    enemies.splice(ei, 1);
+                    bullets.splice(bi, 1);
+                    score += 10;
+                }
+            });
+            if (Math.abs(player.x - e.x) < (player.width/2 + e.w/2) - 10 && Math.abs(player.y - e.y) < (player.height/2 + e.h/2) - 10) {
+                endGame();
+            }
+        });
+        
+        // Score
+        ctx.fillStyle = 'white';
+        ctx.font = '24px Segoe UI';
+        ctx.fillText(`Skor: ${score}`, 20, 40);
+        
+        gameLoopId = requestAnimationFrame(gameLoop);
+    }
+
+    function spawnEnemy() {
+        const size = Math.random() * 20 + 20;
+        enemies.push({
+            x: Math.random() * canvas.width,
+            y: -size,
+            w: size, h: size,
+            speed: Math.random() * 2 + 1.5
+        });
+    }
+
+    // --- Game State ---
+    let enemySpawner;
+    function startGame() {
+        initAudio();
+        isGameRunning = true;
+        score = 0;
+        player = { x: canvas.width / 2, y: canvas.height - 60, width: 50, height: 55, speed: 5 };
+        enemies = [];
+        bullets = [];
+        
+        startScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+        controlsContainer.classList.remove('hidden');
+        
+        startMusic();
+        enemySpawner = setInterval(spawnEnemy, 1200);
+        gameLoop();
+    }
+
+    function endGame() {
+        isGameRunning = false;
+        cancelAnimationFrame(gameLoopId);
+        clearInterval(enemySpawner);
+        stopMusic();
+        
+        finalScoreElement.innerText = `Skor Akhir: ${score}`;
+        gameOverScreen.classList.remove('hidden');
+        controlsContainer.classList.add('hidden');
+    }
+
+    function shoot() {
+        if (!isGameRunning) return;
+        bullets.push({ x: player.x, y: player.y - 25 });
+        playSound(laserBuffer, 0.4);
+    }
+
+    // --- Event Listeners ---
+    startButton.addEventListener('click', startGame);
+    restartButton.addEventListener('click', startGame);
+
+    // Controls
+    function setupControls() {
+        const controlMapping = {
+            'btn-up': 'up', 'btn-down': 'down', 'btn-left': 'left', 'btn-right': 'right'
+        };
+        for (const id in controlMapping) {
+            const el = document.getElementById(id);
+            const state = controlMapping[id];
+            el.addEventListener('mousedown', (e) => { e.preventDefault(); controlState[state] = true; });
+            el.addEventListener('mouseup', (e) => { e.preventDefault(); controlState[state] = false; });
+            el.addEventListener('mouseleave', (e) => { e.preventDefault(); controlState[state] = false; });
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); controlState[state] = true; }, { passive: false });
+            el.addEventListener('touchend', (e) => { e.preventDefault(); controlState[state] = false; });
+        }
+        document.getElementById('btn-fire').addEventListener('click', shoot); // For desktop clicks
+        document.getElementById('btn-fire').addEventListener('touchstart', (e) => { e.preventDefault(); shoot(); }, { passive: false });
+        
+        // Keyboard
+        window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; if(e.key === ' ') shoot(); });
+        window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+    }
+    
+    // --- Initial Call ---
+    createStars(150);
+    drawBackground();
+    setupControls();
+};
+</script>
+</body>
+</html>
+
